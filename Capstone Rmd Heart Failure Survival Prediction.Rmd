@@ -1,0 +1,514 @@
+---
+title: "HarvardX PH125.9x Data Science Capstone Project: Capstone Rmd Heart Failure Survival Prediction"
+author: "Kingsley Sam"
+date: "10 April 2021"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+    
+
+---
+
+Content   
+1.Introduction   
+2.Method  
+2.1. Tidying the Dataset  
+2.2. Statistical quantitative description of the variables  
+2.3. Data Exploration  
+2.4. Distributions of each variable  
+2.5. Selection of Meaningful Features  
+3.Modeling  
+4.Result and Discussion   
+5.Conclusion  
+6.Reference  
+
+
+1.Introduction  
+
+Heart failure is affecting more than 26 million people worldwide and is increasing the prevalence[1]. When heart failure progresses, the heart becomes less effective to pump blood to the aorta. With the reduced cardiac output, perfusion to end-organs becomes insufficient, which eventually leads to fatal outcome.   
+  
+New York Heart Association(NYHA) functional classification is used to categorizing patients from Class I to Class IV according to the clinical signs and symptoms to indicate the disease severity. Kaplan Meier plot is used to studying the general pattern of survival from censoring data over a period of time for different patient groups in the study.
+By applying supervised machine learning methodologies to the dataset obtained from electronic health records, we will be able to develop algorithms to predict survival of patients based on variables in the dataset.  
+  
+In this project, the Heart Failure Clinical Records Data Set will be used to provide a survival predict model of patient with heart failure. The data set can be found at https://archive.ics.uci.edu/ml/datasets/Heart+failure+clinical+records. The original dataset version was collected by Government College University in Pakistan.The current version of the dataset was elaborated by Krembil Research Institute in Toronto and donated to the University of California Irvine Machine Learning Repository in 2020.  
+
+```{r setup, include=FALSE}
+
+## R Markdown
+
+#This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+#When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(readxl)) install.packages("readxl", repos = "http://cran.us.r-project.org")
+if(!require(e1071)) install.packages("e1071", repos = "http://cran.us.r-project.org")
+if(!require(randomForest)) install.packages("randomForest", repos = "http://cran.us.r-project.org")
+if(!require(xgboost)) install.packages("xgboost", repos = "http://cran.us.r-project.org")
+if(!require(adabag)) install.packages("adabag", repos = "http://cran.us.r-project.org")
+if(!require(tinytex)) install.packages("tinytex", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) install.packages("data.table", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+library(dplyr)
+library(tidyverse)
+library(readxl)
+library(tinytex)
+library(e1071)
+library(randomForest)
+library(rsample)
+library(xgboost)
+library(adabag)
+library(data.table)
+library(caret)
+```
+  
+  
+    
+2. Methods and Analysis  
+  
+2.1 Tidying the Dataset    
+The Heart failure clinical records Data Set was downloaded from UCI repository for machine learning.
+This data set is tidy without missing data when we use "view" functiont to check the data visually. Since the dataset is relatively small in size, visual check is feasible and quick. The column names have been defined when we load the dataset in local environment. This dataset contains the medical records of 299 patients who had heart failure, collected during their follow-up period, where each patient profile has 13 clinical features in the following.  
+
+```{r}
+# Download dateset from UCI repository for machine learning
+download.file("https://archive.ics.uci.edu/ml/machine-learning-databases/00519/heart_failure_clinical_records_dataset.csv",
+              "heart_failure_clinical_records_dataset.csv")
+              
+# Load the dataset with named columns
+data_columns <- c("age", "anaemia", "hbp", "CPK", "diabetes", "ef", "platelets",
+                  "sex","serum_creatinine", "serum_Na", "smoking", 
+                  "time_fu_period", "death")
+data<- read.csv ("heart_failure_clinical_records_dataset.csv", sep="," , 
+                 header = TRUE)
+
+#Visual check the dataset
+view(data)
+
+#2.2 Statistical quantitative description of the variables
+str(data)
+dim(data)
+head(data)
+summary(data)
+```
+  
+2.3 Data Exploration  
+  
+To explore the distribution pattern of each independent variables against the death event, which implied the potential influence on prediction model.   Afterward we will consider which columns of the dataset will be kept for the analysis. The dependent variable is death event which is a categorical variables and the target to be predicted by the 12 variables in dataset.
+We applied ggplot function to plot the distribution of each variable in regards to death event.  
+  
+Density plots are used for the 7 continuous independent variables, which included age, creatinine phosphokinase, ejection fraction, platelets, serum creatinine, serum sodium and time.    
+  
+```{r Vizualize the density distributions1}
+# Vizualize the density distributions for Death cases against the variables
+# the available continuous features
+# Create a function for the density plots
+density_plot <- function(column, param_name){
+  ggplot(data, aes(x=column, fill=DEATH_EVENT, color=DEATH_EVENT)) +
+    geom_density(alpha=0.2) +
+    theme(legend.position="bottom") +
+    scale_x_continuous(name=param_name) +
+    scale_fill_discrete(name='DEATH EVENT',labels=c("No", "Yes")) +
+    scale_color_discrete(name='DEATH EVENT',labels=c("No", "Yes"))
+}
+
+
+```
+  
+Stacked barplots are used for the 5 categorical independent variables, which included anaemia, high blood pressure, diabetes, sex, and smoking.   
+  
+```{r Vizualize the density distributions2}
+# Vizualize the density distributions for Death cases against the variables
+# the available categorical features
+# Create a function for the barplots
+format_barplot <- function(gc, columngroup, param_name, labelling){
+  ggplot(gc, aes(x=columngroup, y=n, fill=DEATH_EVENT))+ 
+    geom_bar( stat="identity") +
+    scale_x_discrete(name=param_name, labels=labelling) +
+    scale_fill_discrete(name='DEATH EVENT', labels=c("No", "Yes")) +
+    scale_color_discrete(name='DEATH EVENT', labels=c("No", "Yes")) +
+    theme(legend.position="top")
+}
+```
+  
+2.4 Distributions of each variable  
+The second function is applied to categorical variables to convert from numeric to factor and create stacked barplots.  
+  
+```{r Distributions of each variable}
+
+# Plot for all continuous variables
+plotAge <- density_plot(data$age, "Age")
+plotAge
+
+plotCreatinine_phosphokinase<-
+  density_plot(data$creatinine_phosphokinase, 
+               "level of the creatinine phosphokinase(CPK) enzyme in the blood (mcg/L)")
+plotCreatinine_phosphokinase
+
+plotEjection_fraction<-density_plot(data$ejection_fraction, "Ejection fraction %")
+plotEjection_fraction
+
+plotPlatelets <- density_plot(data$platelets, 
+                              "platelets in the blood (kiloplatelets/mL)")
+plotPlatelets
+
+plotSerum_creatinine <- density_plot(data$serum_creatinine, 
+                                     "level of serum creatinine in the blood (mg/dL) ")
+plotSerum_creatinine
+
+plotSerum_sodium <- density_plot(data$serum_sodium, 
+                                 "Level of Serum sodium in the blood (mEq/L)")
+plotSerum_sodium
+
+plotTime <- density_plot(data$time, "Time of follow-up period(days)")
+plotTime
+
+```
+
+
+
+
+```{r Plot for all categorical features}
+# Convert categorical variables from numeric to factor.
+cols <- c("anaemia", "diabetes", "high_blood_pressure", "sex", "smoking", 
+          "DEATH_EVENT")
+data[cols] <- lapply(data[cols], factor)
+
+
+# Plot for all categorical features
+groupby_sex <- data %>% group_by(sex) %>% count(DEATH_EVENT) %>% as.data.frame()
+plotSex <- format_barplot(groupby_sex, groupby_sex$sex, "sex", 
+                          c("Female", "Male"))
+plotSex
+
+groupby_anaemia <- data %>% group_by(anaemia) %>%
+  count(DEATH_EVENT) %>% as.data.frame()
+plotAnaemia <- format_barplot(groupby_anaemia, groupby_anaemia$anaemia, 
+                              "Anaemia", c("Normal", "Patient with Anaemia"))
+plotAnaemia
+
+groupby_diabetes <- data %>% group_by(diabetes) %>% count(DEATH_EVENT) %>% 
+  as.data.frame()
+plotDiabetes <- format_barplot(groupby_diabetes, groupby_diabetes$diabetes, 
+                               "Diabetes", c("Normal", "Patient with Diabetes"))
+plotDiabetes
+
+groupby_smoking <- data %>% group_by(smoking) %>% count(DEATH_EVENT) %>% 
+  as.data.frame()
+plotSmoking <- format_barplot(groupby_smoking, groupby_smoking$smoking, 
+                              "smoking", c("Non-smoker", "Smoker"))
+plotSmoking
+
+groupby_hbp <- data %>% group_by(high_blood_pressure) %>% count(DEATH_EVENT) %>% 
+  as.data.frame()
+plotHBP <- format_barplot(groupby_hbp, groupby_hbp$high_blood_pressure, 
+                          "Hypertension", c("Normal Blood Pressure", 
+                                            "Hypertension"))
+plotHBP
+```
+  
+Chi-Square Test for each independent categorical variable to show their association with the dependent variable death event.  
+  
+```{r Chi-Square Test for each independent categorical variable}
+# Chi-Square Test for each independent categorical variable 
+# sex
+table(data$DEATH_EVENT, data$sex)
+chisq.test(data$DEATH_EVENT, data$sex, correct=FALSE)                        
+# anaemia
+table(data$DEATH_EVENT, data$anaemia)
+chisq.test(data$DEATH_EVENT, data$anaemia, correct=FALSE)  
+# diabetes
+table(data$DEATH_EVENT, data$diabetes)
+chisq.test(data$DEATH_EVENT, data$diabetes, correct=FALSE) 
+# smoking
+table(data$DEATH_EVENT, data$smoking)
+chisq.test(data$DEATH_EVENT, data$smoking, correct=FALSE)  
+# sex
+table(data$DEATH_EVENT, data$high_blood_pressure)
+chisq.test(data$DEATH_EVENT, data$high_blood_pressure, correct=FALSE)  
+#ejection_fraction
+data$DEATH_EVENT <- as.numeric(data$DEATH_EVENT)
+cor.test(data$ejection_fraction, data$DEATH_EVENT)
+# high_blood_pressure
+table(data$DEATH_EVENT, data$high_blood_pressure)
+chisq.test(data$DEATH_EVENT, data$high_blood_pressure, correct=FALSE) 
+
+```
+  
+Pearson's correlation for each independent continuous variable to show their association with the dependent variable death event.  
+  
+```{r Pearson correlation for each independent continuous variable}
+# Pearson's correlation for each independent continuous variable
+#age
+cor.test(data$age, data$DEATH_EVENT)
+#creatinine_phosphokinase
+cor.test(data$creatinine_phosphokinase, data$DEATH_EVENT)
+#Platelets 
+cor.test(data$platelets , data$DEATH_EVENT)
+#Serum_creatinine
+cor.test(data$serum_creatinine, data$DEATH_EVENT)
+#serum_sodium
+cor.test(data$serum_sodium, data$DEATH_EVENT)
+#time
+cor.test(data$time, data$DEATH_EVENT)
+```
+
+
+2.5 Selection of Meaningful Features  
+  
+The correlation between variable and death event is considered to be statistically significant when p-value <0.05 in Chi-square test or Pearson’s correlation. P-value <0.05 was a commonly used threshold in biostatistic research. According to the findings in the following, there are 5 variables statistically significant in the correlation to the death event. The variables are age(p-value = 8.917e-06), ejection fraction(p-value = 2.453e-06), serum creatinine(p-value = 2.19e-07), serum sodium(p-value = 0.0006889) and time of follow up period(p-value < 2.2e-16).  
+Having identified these 5 variables, we can filter the dataset and prepare for analysis using this optimized, tidy version. The dataset contains 299 observations, each containing 5 independent variables as the predictors as well as the death event which is the outcome trying to predict.  
+We only keep the 5 statistically significant independent variables and the dependent variable in the a clean dataset. For the dependent variable DEATH_EVENT, is it required to be factor with 2 levels in the confusion matrix of machine learning models.  
+```{r Selection of Meaningful Features}
+# Keep the statistically significant independent variables and the dependent 
+# variable in the a clean dataset
+keep_columns <- c(1, 5, 8, 9, 12, 13) 
+data_clean <- data[, keep_columns] 
+dim(data_clean)
+str(data_clean)
+view(data_clean)
+
+# We are now ready to select a machine learning algorithm to create a prediction 
+# model for our datasets.
+cols <- c(6)
+data_clean[cols] <- lapply(data_clean[cols], factor)
+str(data_clean)
+
+
+```
+  
+3. Modeling  
+  
+Creating the Training and Testing Sets  
+In order to predict heart disease in patients, we must separate the dataset into a training and a testing set, each containing different observations. 20% of the dataset is thus assigned to the testing set. 
+  
+```{r Modeling}
+# The testing set will be 20% of the orignal dataset.
+set.seed(1)
+index <- createDataPartition(y = data_clean$DEATH_EVENT, times = 1, p = 0.2, 
+                             list = FALSE)
+trainingSet <- data_clean[-index,]
+testingSet <- data_clean[index,]
+```
+  
+We train a k-nearest neighbor algorithm with a tunegrid parameter to optimize for k  
+  
+```{r}
+library(caret)
+library(e1071)
+set.seed(1000)
+train_knn <- train(DEATH_EVENT ~ ., method = "knn",
+                   data = trainingSet,
+                   tuneGrid = data.frame(k = seq(2, 30, 2)))
+train_knn$bestTune
+confusionMatrix(predict(train_knn, testingSet, type = "raw"),
+                testingSet$DEATH_EVENT)$overall["Accuracy"]
+```
+  
+    
+1st model: Knn    
+  
+```{r 1st model: Knn}
+# 1st model: Knn 
+# Visualize and save the optimal value for k
+k_plot <- ggplot(train_knn, highlight = TRUE)
+k_plot
+optim_k <- train_knn$bestTune[1, 1]
+optim_k 
+# Train and predict using k-nn with optimized k value
+knn_fit <- knn3(DEATH_EVENT ~ ., data = trainingSet, k = optim_k)
+y_hat_knn <- predict(knn_fit, testingSet, type = "class")
+cm_knn <- confusionMatrix(data = y_hat_knn, reference = testingSet$DEATH_EVENT, 
+                          positive = NULL)
+cm_knn
+# Return optimized k value, Accuracy, Sensitivity and Specificity
+Accuracy_knn <- cm_knn$overall["Accuracy"]
+Sensitivity_knn <- cm_knn$byClass["Sensitivity"]
+Specificity_knn <- cm_knn$byClass["Specificity"]
+Accuracy_knn
+Sensitivity_knn
+Specificity_knn
+
+```
+  
+    
+2nd model: Naive Bayes
+  
+```{r 2nd model: Naive Bayes}
+# 2nd model: Naive Bayes
+# Look at correlation between features to verify independance
+matrix_data <- matrix(as.numeric(unlist(data_clean)),nrow=nrow(data_clean)) 
+correlations <- cor(matrix_data)
+correlations
+
+# Train and predict using Naive Bayes
+train_nb <- train(DEATH_EVENT ~ ., method = "nb", data = trainingSet)
+y_hat_nb <- predict(train_nb, testingSet)
+cm_nb <- confusionMatrix(data = y_hat_nb, reference = testingSet$DEATH_EVENT, 
+                         positive = NULL)
+cm_nb
+# Return Accuracy, Sensitivity and Specificity
+Accuracy_nb <- cm_nb$overall["Accuracy"]
+Sensitivity_nb <- cm_nb$byClass["Sensitivity"]
+Specificity_nb <- cm_nb$byClass["Specificity"]
+Accuracy_nb
+Sensitivity_nb
+Specificity_nb
+```
+  
+    
+3rd model: Generalized Linear Regression Model  
+  
+```{r 3rd model: Generalized Linear Regression Model}
+# 3rd model: Generalized Linear Regression Model
+# perform 10-fold cross validation
+trCntl <- trainControl(method = "CV",number = 10)
+# fit into the generalized linear regression model
+glmModel <- train(DEATH_EVENT ~ .,data = trainingSet,trControl = trCntl,
+                  method="glm",family = "binomial")
+# print the model info
+summary(glmModel)
+glmModel
+confusionMatrix(glmModel)
+Accuracy_glm<-"0.8067" 
+Accuracy_glm
+
+```
+  
+    
+4th model: Random Forest Model with K-Fold Cross-Validation  
+  
+```{r}
+# 4th model: Random Forest Model with K-Fold Cross-Validation
+library(randomForest)
+library(rsample)
+# Define train control for k-fold (10-fold here) cross validation
+set.seed(1984)
+train_control <- trainControl(method="cv", number=10)
+# Train and predict using Random Forest
+set.seed(1989)
+train_rf <- train(DEATH_EVENT ~ ., data = trainingSet,
+                    method = "rf",
+                    trControl = train_control)
+y_hat_rf <- predict(train_rf, testingSet)
+cm_rf <- confusionMatrix(data = y_hat_rf, reference = testingSet$DEATH_EVENT, 
+                         positive = NULL)
+cm_rf 
+# Return Accuracy, Sensitivity and Specificity
+Accuracy_rf <- cm_rf$overall["Accuracy"]
+Sensitivity_rf <- cm_rf$byClass["Sensitivity"]
+Specificity_rf <- cm_rf$byClass["Specificity"]
+Accuracy_rf
+Sensitivity_rf 
+Specificity_rf
+```
+  
+5th model: Weighted Subspace Random Forest with K-Fold Cross-Validation   
+  
+```{r}
+# 5th model: Weighted Subspace Random Forest with K-Fold Cross-Validation
+set.seed(1989)
+train_wsrf <- train(DEATH_EVENT ~ ., data = trainingSet,
+                  method = "wsrf",
+                  trControl = train_control)
+y_hat_wsrf <- predict(train_wsrf, testingSet)
+cm_wsrf <- confusionMatrix(data = y_hat_wsrf, reference = testingSet$DEATH_EVENT, 
+                           positive = NULL)
+cm_wsrf 
+# Return Accuracy, Sensitivity and Specificity
+Accuracy_wsrf <- cm_wsrf$overall["Accuracy"]
+Sensitivity_wsrf <- cm_wsrf$byClass["Sensitivity"]
+Specificity_wsrf <- cm_wsrf$byClass["Specificity"]
+Accuracy_wsrf
+Sensitivity_wsrf 
+Specificity_wsrf
+```
+  
+    
+Model 6: Adaptive Boosting  
+  
+```{r}
+#Model 6: Adaptive Boosting
+library(adabag)
+train_ada <- train(DEATH_EVENT ~ ., method = "adaboost", data = trainingSet)
+y_hat_ada <- predict(train_ada, testingSet)
+cm_ada <- confusionMatrix(data = y_hat_ada, reference = testingSet$DEATH_EVENT, 
+                          positive = NULL)
+cm_ada 
+# Return Accuracy, Sensitivity and Specificity
+Accuracy_ada <- cm_ada$overall["Accuracy"]
+Sensitivity_ada <- cm_ada$byClass["Sensitivity"]
+Specificity_ada <- cm_ada$byClass["Specificity"]
+Accuracy_ada
+Sensitivity_ada
+Specificity_ada
+```
+  
+    
+Model 7: Extreme Gradient Boosting    
+  
+```{r}
+#Model 7: Extreme Gradient Boosting
+library(readxl)
+library(xgboost)
+train_xgb <- train(DEATH_EVENT ~ ., method = "xgbTree", data = trainingSet)
+y_hat_xgb <- predict(train_xgb, testingSet)
+cm_xgb <- confusionMatrix(data = y_hat_xgb, reference = testingSet$DEATH_EVENT, 
+                          positive = NULL)
+cm_xgb 
+# Return Accuracy, Sensitivity and Specificity
+Accuracy_xgb <- cm_xgb$overall["Accuracy"]
+Sensitivity_xgb <- cm_xgb$byClass["Sensitivity"]
+Specificity_xgb <- cm_xgb$byClass["Specificity"]
+Accuracy_xgb
+Sensitivity_xgb
+Specificity_xgb
+```
+
+4. Result and Discussion   
+  
+In this report, I tried to apply 7 models into the prediction algorithm for the death event of patient with heart failure by using the 5 identified variables. Among these 7 models, both the Model 1: K-Nearest Neighbors and Model 7: Extreme Gradient Boosting  yield the highest accuracy with same value 0.885245. Regarding the higher specificity of the Model 7, 0.75, the Model 7: Extreme Gradient Boosting is adopted as the final model to be used in prediction.
+
+The model is potential to be a prediction tool for clinical triage and patient management of heart failure. With the algorithm prediction, the patient with end-stage heart failure may be told earlier about the disease prognosis for psychological preparation and healthcare professionals can arrange a better palliative care and psychosocial support to patients and their family. Meanwhile, clinicians may screen out the patients who are predicted to have better chance to survive, so that the healthcare system can concentrate the resources to save the patients’ life.  
+
+In the dataset, there are only 299 observations from a country. The current model should be further improved by a large dataset obtained from different countries and institutes in order to improve the generalizability. Additional clinical parameters may also be considered to collect in future study regarding the known pathophysiological and pharmacological information, for example other heart failure clinical parameters, blood test result, drug usage and activities of daily living(ADL) score ,in order to further improve the accuracy and specificity of the prediction algorithm.  
+
+
+
+
+```{r message=FALSE, warning=FALSE, paged.print=TRUE}
+results <- data_frame(
+Model=c("Model 1: K-Nearest Neighbors","Model 2: Naive Bayes", 
+        "Model 3: Generalized Linear Regression Model with K-Fold Cross-Validation", 
+        "Model 4: Random Forest and K-Fold Cross-Validation",
+        "Model 5: Weighted Subspace Random Forest and K-Fold Cross-Validation", 
+        "Model 6: Adaptive Boosting","Model 7: Extreme Gradient Boosting"), 
+Accuracy=c(Accuracy_knn, Accuracy_nb, Accuracy_glm, Accuracy_rf, Accuracy_wsrf, 
+           Accuracy_ada, Accuracy_xgb),
+Sensitivity=c(Sensitivity_knn, Sensitivity_nb, "-", Sensitivity_rf, 
+              Accuracy_wsrf, Sensitivity_ada, Sensitivity_xgb), 
+Specificity=c(Specificity_knn, Specificity_nb, "-", Specificity_rf, 
+              Specificity_wsrf, Specificity_ada, Specificity_xgb)
+) 
+results
+```
+  
+      
+5. Conclusion   
+   
+In this report, we present the process of analysis and building algorithms by using various data analysis and machine learning methodologies in R as part of course HarvardX: PH125.9 - Data Science: Capstone. We are able to build a model by using Extreme Gradient Boosting to predict the death event of patient with heart failure. The accuracy of the model is high and able to reach 88.5%. The Sensitivity and specificity are high and able to reach 95.1% and 75% respectively. The key predictors for death event are age, ejection fraction, serum creatinine, serum sodium and time of follow up period, which are selected to optimize the model. The model should be further improved upon to be applied in clinical settings.  
+    
+    
+6. Reference:    
+  
+G. Savarese, and L.H Lund(2017). Global Public Health Burden of Heart Failure. Card Fail Rev. 2017 Apr; 3(1): 7–11.https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5494150/  
+      
+D. Chicco and G. Jurman(2020). Machine learning can predict survival of patients with heart failure from serum creatinine and ejection fraction alone. BMC Medical Informatics and Decision Making (2020) 20:16 https://bmcmedinformdecismak.biomedcentral.com/articles/10.1186/s12911-020-1023-5  
+    
+Ahmad T, Munir A, Bhatti SH, Aftab M, Raza MA (2017) Survival analysis of heart failure patients: A case study. PLoS ONE 12(7):e0181001. https://doi.org/10.1371/journal.pone.0181001  
+    
+H. Zhao, G.J. Williams, J.Z.Huang(2017). Journal of Statistical , March 2017, Volume 77, Issue 3. Software. https://www.researchgate.net/publication/315908727_wsrf_An_R_Package_for_Classification_with_Scalable_Weighted_Sub space_Random_Forests/fulltext/58ed03a10f7e9bf619bb0614/wsrf-An-R-Package-for-Classification-with-Scalable-Weighted- Subspace-Random-Forests.pdf  
+  
